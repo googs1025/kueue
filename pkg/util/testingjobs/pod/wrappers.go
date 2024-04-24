@@ -63,7 +63,7 @@ func (p *PodWrapper) Obj() *corev1.Pod {
 	return &p.Pod
 }
 
-// Group returns multiple pods that form a pod group, based on the original wrapper.
+// MakeGroup returns multiple pods that form a pod group, based on the original wrapper.
 func (p *PodWrapper) MakeGroup(count int) []*corev1.Pod {
 	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
@@ -84,7 +84,7 @@ func (p *PodWrapper) Queue(q string) *PodWrapper {
 	return p.Label(constants.QueueLabel, q)
 }
 
-// Queue updates the queue name of the Pod
+// PriorityClass updates the priority class name of the queue
 func (p *PodWrapper) PriorityClass(pc string) *PodWrapper {
 	p.Spec.PriorityClassName = pc
 	return p

@@ -142,7 +142,7 @@ func WithManagerName(n string) Option {
 	}
 }
 
-// WithLabelKeysToCopy
+// WithLabelKeysToCopy adds the kueue's LabelKeys to copy.
 func WithLabelKeysToCopy(n []string) Option {
 	return func(o *Options) {
 		o.LabelKeysToCopy = n

@@ -388,11 +388,11 @@ func (c *ClusterQueue) Active() bool {
 // compete with other workloads, until cluster events free up quota.
 // The workload should not be reinserted if it's already in the ClusterQueue.
 // Returns true if the workload was inserted.
-func (cq *ClusterQueue) RequeueIfNotPresent(wInfo *workload.Info, reason RequeueReason) bool {
-	if cq.queueingStrategy == kueue.StrictFIFO {
-		return cq.requeueIfNotPresent(wInfo, reason != RequeueReasonNamespaceMismatch)
+func (c *ClusterQueue) RequeueIfNotPresent(wInfo *workload.Info, reason RequeueReason) bool {
+	if c.queueingStrategy == kueue.StrictFIFO {
+		return c.requeueIfNotPresent(wInfo, reason != RequeueReasonNamespaceMismatch)
 	}
-	return cq.requeueIfNotPresent(wInfo, reason == RequeueReasonFailedAfterNomination || reason == RequeueReasonPendingPreemption)
+	return c.requeueIfNotPresent(wInfo, reason == RequeueReasonFailedAfterNomination || reason == RequeueReasonPendingPreemption)
 }
 
 // queueOrderingFunc returns a function used by the clusterQueue heap algorithm
