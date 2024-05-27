@@ -47,6 +47,8 @@ const (
 	DefaultMultiKueueGCInterval                         = time.Minute
 	DefaultMultiKueueOrigin                             = "multikueue"
 	DefaultMultiKueueWorkerLostTimeout                  = 15 * time.Minute
+	DefaultRequeuingBackoffBaseSeconds                  = 60
+	DefaultRequeuingBackoffMaxSeconds                   = 3600
 )
 
 func getOperatorNamespace() string {
@@ -59,6 +61,8 @@ func getOperatorNamespace() string {
 }
 
 // SetDefaults_Configuration sets default values for ComponentConfig.
+//
+//nolint:revive // format required by generated code for defaulting
 func SetDefaults_Configuration(cfg *Configuration) {
 	if cfg.Namespace == nil {
 		cfg.Namespace = ptr.To(getOperatorNamespace())
@@ -121,10 +125,17 @@ func SetDefaults_Configuration(cfg *Configuration) {
 			}
 			cfg.WaitForPodsReady.BlockAdmission = &defaultBlockAdmission
 		}
-		if cfg.WaitForPodsReady.RequeuingStrategy == nil || cfg.WaitForPodsReady.RequeuingStrategy.Timestamp == nil {
-			cfg.WaitForPodsReady.RequeuingStrategy = &RequeuingStrategy{
-				Timestamp: ptr.To(EvictionTimestamp),
-			}
+		if cfg.WaitForPodsReady.RequeuingStrategy == nil {
+			cfg.WaitForPodsReady.RequeuingStrategy = &RequeuingStrategy{}
+		}
+		if cfg.WaitForPodsReady.RequeuingStrategy.Timestamp == nil {
+			cfg.WaitForPodsReady.RequeuingStrategy.Timestamp = ptr.To(EvictionTimestamp)
+		}
+		if cfg.WaitForPodsReady.RequeuingStrategy.BackoffBaseSeconds == nil {
+			cfg.WaitForPodsReady.RequeuingStrategy.BackoffBaseSeconds = ptr.To[int32](DefaultRequeuingBackoffBaseSeconds)
+		}
+		if cfg.WaitForPodsReady.RequeuingStrategy.BackoffMaxSeconds == nil {
+			cfg.WaitForPodsReady.RequeuingStrategy.BackoffMaxSeconds = ptr.To[int32](DefaultRequeuingBackoffMaxSeconds)
 		}
 	}
 	if cfg.Integrations == nil {
@@ -178,5 +189,8 @@ func SetDefaults_Configuration(cfg *Configuration) {
 	}
 	if cfg.MultiKueue.WorkerLostTimeout == nil {
 		cfg.MultiKueue.WorkerLostTimeout = &metav1.Duration{Duration: DefaultMultiKueueWorkerLostTimeout}
+	}
+	if fs := cfg.FairSharing; fs != nil && fs.Enable && len(fs.PreemptionStrategies) == 0 {
+		fs.PreemptionStrategies = []PreemptionStrategy{LessThanOrEqualToFinalShare, LessThanInitialShare}
 	}
 }

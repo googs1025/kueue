@@ -83,10 +83,9 @@ func Import(ctx context.Context, c client.Client, cache *util.ImportCache, jobs 
 
 		if err := createWorkload(ctx, c, wl); err != nil {
 			return false, fmt.Errorf("creating workload: %w", err)
-
 		}
 
-		//make its admission and update its status
+		// make its admission and update its status
 		info := workload.NewInfo(wl)
 		cq := cache.ClusterQueues[string(lq.Spec.ClusterQueue)]
 		admission := kueue.Admission{
@@ -136,9 +135,9 @@ func Import(ctx context.Context, c client.Client, cache *util.ImportCache, jobs 
 }
 
 func checkError(err error) (retry, reload bool, timeout time.Duration) {
-	retry_seconds, retry := apierrors.SuggestsClientDelay(err)
+	retrySeconds, retry := apierrors.SuggestsClientDelay(err)
 	if retry {
-		return true, false, time.Duration(retry_seconds) * time.Second
+		return true, false, time.Duration(retrySeconds) * time.Second
 	}
 
 	if apierrors.IsConflict(err) {

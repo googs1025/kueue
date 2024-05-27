@@ -55,7 +55,6 @@ const (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var _ = ginkgo.Describe("Job controller", ginkgo.Ordered, ginkgo.ContinueOnFailure, func() {
-
 	ginkgo.BeforeAll(func() {
 		fwk = &framework.Framework{
 			CRDPath:     crdPath,
@@ -342,7 +341,7 @@ var _ = ginkgo.Describe("Job controller", ginkgo.Ordered, ginkgo.ContinueOnFailu
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			ginkgo.By("add labels & annotations to the admission check", func() {
+			ginkgo.By("add labels & annotations for the workers to the admission check", func() {
 				gomega.Eventually(func() error {
 					var newWL kueue.Workload
 					gomega.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(createdWorkload), &newWL)).To(gomega.Succeed())
@@ -350,18 +349,6 @@ var _ = ginkgo.Describe("Job controller", ginkgo.Ordered, ginkgo.ContinueOnFailu
 						Name:  "check",
 						State: kueue.CheckStateReady,
 						PodSetUpdates: []kueue.PodSetUpdate{
-							{
-								Name: "launcher",
-								Annotations: map[string]string{
-									"ann1": "ann-value-for-launcher",
-								},
-								Labels: map[string]string{
-									"label1": "label-value-for-launcher",
-								},
-								NodeSelector: map[string]string{
-									"selector1": "selector-value-for-launcher",
-								},
-							},
 							{
 								Name: "worker",
 								Annotations: map[string]string{
@@ -439,12 +426,9 @@ var _ = ginkgo.Describe("Job controller", ginkgo.Ordered, ginkgo.ContinueOnFailu
 				))
 			})
 
-			ginkgo.By("verify the PodSetUpdates are propagated to the running job, for launcher", func() {
+			ginkgo.By("verify the node selectors are propagated to the running job, for launcher", func() {
 				launcher := createdJob.Spec.MPIReplicaSpecs[kubeflow.MPIReplicaTypeLauncher].Template
-				gomega.Expect(launcher.Annotations).Should(gomega.HaveKeyWithValue("ann1", "ann-value-for-launcher"))
-				gomega.Expect(launcher.Labels).Should(gomega.HaveKeyWithValue("label1", "label-value-for-launcher"))
 				gomega.Expect(launcher.Spec.NodeSelector).Should(gomega.HaveKeyWithValue(instanceKey, "test-flavor"))
-				gomega.Expect(launcher.Spec.NodeSelector).Should(gomega.HaveKeyWithValue("selector1", "selector-value-for-launcher"))
 			})
 
 			ginkgo.By("delete the localQueue to prevent readmission", func() {
@@ -869,12 +853,10 @@ var _ = ginkgo.Describe("Job controller interacting with scheduler", ginkgo.Orde
 		gomega.Expect(createdJob.Spec.MPIReplicaSpecs[kubeflow.MPIReplicaTypeWorker].Template.Spec.NodeSelector[instanceKey]).Should(gomega.Equal(onDemandFlavor.Name))
 		util.ExpectPendingWorkloadsMetric(clusterQueue, 0, 0)
 		util.ExpectReservingActiveWorkloadsMetric(clusterQueue, 1)
-
 	})
 
 	ginkgo.When("The workload's admission is removed", func() {
 		ginkgo.It("Should restore the original node selectors", func() {
-
 			localQueue := testing.MakeLocalQueue("local-queue", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
 			job := testingmpijob.MakeMPIJob(jobName, ns.Name).Queue(localQueue.Name).
 				Request(kubeflow.MPIReplicaTypeLauncher, corev1.ResourceCPU, "3").

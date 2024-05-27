@@ -54,7 +54,6 @@ const (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
-
 	var (
 		// Values changed by tests (and reset after each):
 		podsReadyTimeout           = defaultPodsReadyTimeout
@@ -124,7 +123,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 	})
 
 	ginkgo.Context("Long PodsReady timeout", func() {
-
 		ginkgo.BeforeEach(func() {
 			podsReadyTimeout = time.Minute
 		})
@@ -191,11 +189,9 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
 			util.ExpectWorkloadsToBeWaiting(ctx, k8sClient, devWl)
 		})
-
 	})
 
 	var _ = ginkgo.Context("Short PodsReady timeout", func() {
-
 		ginkgo.BeforeEach(func() {
 			podsReadyTimeout = 3 * time.Second
 			requeuingBackoffLimitCount = ptr.To[int32](2)
@@ -242,6 +238,7 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 			}, util.Timeout, util.Interval).Should(gomega.Succeed(), "the workload should be evicted after the timeout expires")
 
 			util.FinishEvictionForWorkloads(ctx, k8sClient, prodWl1)
+			util.ExpectEvictedWorkloadsTotalMetric(prodClusterQ.Name, kueue.WorkloadEvictedByPodsReadyTimeout, 1)
 
 			ginkgo.By("verify the 'prod2' workload gets admitted and the 'prod1' is pending by backoff")
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl2)
@@ -254,6 +251,7 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 			gomega.Expect(k8sClient.Create(ctx, prodWl)).Should(gomega.Succeed())
 			ginkgo.By("checking the 'prod' workload is admitted")
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
+			util.ExpectQuotaReservedWorkloadsTotalMetric(prodClusterQ, 1)
 			util.ExpectAdmittedWorkloadsTotalMetric(prodClusterQ, 1)
 			ginkgo.By("exceed the timeout for the 'prod' workload")
 			time.Sleep(podsReadyTimeout)
@@ -263,10 +261,12 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 
 			ginkgo.By("verify the 'prod' workload gets re-admitted twice")
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
+			util.ExpectQuotaReservedWorkloadsTotalMetric(prodClusterQ, 2)
 			util.ExpectAdmittedWorkloadsTotalMetric(prodClusterQ, 2)
 			time.Sleep(podsReadyTimeout)
 			util.FinishEvictionForWorkloads(ctx, k8sClient, prodWl)
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
+			util.ExpectQuotaReservedWorkloadsTotalMetric(prodClusterQ, 3)
 			util.ExpectAdmittedWorkloadsTotalMetric(prodClusterQ, 3)
 			time.Sleep(podsReadyTimeout)
 			ginkgo.By("evicted re-admitted workload should have 2 in the re-queue count")
@@ -277,19 +277,10 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 				g.Expect(ptr.Deref(prodWl.Spec.Active, true)).Should(gomega.BeFalse())
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
+			// should observe a metrics of WorkloadEvictedByDeactivation
+			util.ExpectEvictedWorkloadsTotalMetric(prodClusterQ.Name, kueue.WorkloadEvictedByDeactivation, 1)
+
 			ginkgo.By("verify the re-activated inactive 'prod' workload re-queue state is reset")
-			// TODO: Once we move a logic to issue the Eviction with InactiveWorkload reason, we need to remove the below updates.
-			// REF: https://github.com/kubernetes-sigs/kueue/issues/1841
-			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(prodWl), prodWl)).Should(gomega.Succeed())
-				apimeta.SetStatusCondition(&prodWl.Status.Conditions, metav1.Condition{
-					Type:    kueue.WorkloadEvicted,
-					Status:  metav1.ConditionTrue,
-					Reason:  kueue.WorkloadEvictedByDeactivation,
-					Message: "evicted by Test",
-				})
-				g.Expect(k8sClient.Status().Update(ctx, prodWl)).Should(gomega.Succeed())
-			}, util.Timeout, util.Interval).Should(gomega.Succeed(), "Job reconciler should add an Evicted condition with InactiveWorkload to the Workload")
 			gomega.Eventually(func(g gomega.Gomega) {
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(prodWl), prodWl)).Should(gomega.Succeed())
 				prodWl.Spec.Active = ptr.To(true)
@@ -444,7 +435,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 	})
 
 	var _ = ginkgo.Context("Requeuing timestamp set to Creation", func() {
-
 		var (
 			standaloneClusterQ *kueue.ClusterQueue
 			standaloneQueue    *kueue.LocalQueue
@@ -510,7 +500,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReady", func() {
 			})
 		})
 	})
-
 })
 
 var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
@@ -583,7 +572,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 	})
 
 	ginkgo.Context("Long PodsReady timeout", func() {
-
 		ginkgo.BeforeEach(func() {
 			podsReadyTimeout = time.Minute
 		})
@@ -612,7 +600,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, devClusterQ.Name, devWl)
 		})
-
 	})
 
 	var _ = ginkgo.Context("Short PodsReady timeout", func() {
@@ -626,6 +613,7 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 			gomega.Expect(k8sClient.Create(ctx, prodWl)).Should(gomega.Succeed())
 			ginkgo.By("checking the 'prod' workload is admitted")
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
+			util.ExpectQuotaReservedWorkloadsTotalMetric(prodClusterQ, 1)
 			util.ExpectAdmittedWorkloadsTotalMetric(prodClusterQ, 1)
 			ginkgo.By("exceed the timeout for the 'prod' workload")
 			time.Sleep(podsReadyTimeout)
@@ -634,6 +622,7 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 
 			ginkgo.By("verify the 'prod' workload gets re-admitted once")
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodClusterQ.Name, prodWl)
+			util.ExpectQuotaReservedWorkloadsTotalMetric(prodClusterQ, 2)
 			util.ExpectAdmittedWorkloadsTotalMetric(prodClusterQ, 2)
 			time.Sleep(podsReadyTimeout)
 			util.ExpectWorkloadToHaveRequeueCount(ctx, k8sClient, client.ObjectKeyFromObject(prodWl), ptr.To[int32](2))
@@ -642,7 +631,6 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 	})
 
 	var _ = ginkgo.Context("Requeuing timestamp set to Creation", func() {
-
 		var (
 			standaloneClusterQ *kueue.ClusterQueue
 			standaloneQueue    *kueue.LocalQueue
@@ -715,5 +703,4 @@ var _ = ginkgo.Describe("SchedulerWithWaitForPodsReadyNonblockingMode", func() {
 			})
 		})
 	})
-
 })

@@ -24,6 +24,7 @@ controllerManager:
       repository: gcr.io/k8s-staging-kueue/kueue
       # This should be set to 'IfNotPresent' for released version      
       pullPolicy: Always
+    podAnnotations: {}
     resources:
       limits:
         cpu: 500m
@@ -68,7 +69,7 @@ managerConfig:
     controller:
       groupKindConcurrency:
         Job.batch: 5
-        Pod.: 5
+        Pod: 5
         Workload.kueue.x-k8s.io: 5
         LocalQueue.kueue.x-k8s.io: 1
         ClusterQueue.kueue.x-k8s.io: 1
@@ -76,9 +77,15 @@ managerConfig:
     clientConnection:
       qps: 50
       burst: 100
-    #pprofBindAddress: :8082
+    #pprofBindAddress: :8083
     #waitForPodsReady:
-    #  enable: true
+    #  enable: false
+    #  timeout: 5m
+    #  blockAdmission: false
+    #  requeuingStrategy:
+    #    timestamp: Eviction
+    #    backoffLimitCount: null # null indicates infinite requeuing
+    #    backoffBaseSeconds: 60
     #manageJobsWithoutQueueName: true
     #internalCertManagement:
     #  enable: false
@@ -92,7 +99,7 @@ managerConfig:
       - "ray.io/raycluster"
       - "jobset.x-k8s.io/jobset"
       - "kubeflow.org/mxjob"
-      - "kubeflow.org/paddlejob"    
+      - "kubeflow.org/paddlejob"
       - "kubeflow.org/pytorchjob"
       - "kubeflow.org/tfjob"
       - "kubeflow.org/xgboostjob"
@@ -103,6 +110,9 @@ managerConfig:
     #       - key: kubernetes.io/metadata.name
     #         operator: NotIn
     #         values: [ kube-system, kueue-system ]
+    # fairSharing:
+    #   enable: true
+    #   preemptionStrategies: [LessThanOrEqualToFinalShare, LessThanInitialShare]
 # ports definition for metricsService and webhookService.
 metricsService:
   ports:
@@ -111,6 +121,7 @@ metricsService:
       protocol: TCP
       targetPort: https
   type: ClusterIP
+  annotations: {}
 webhookService:
   ipDualStack:
     enabled: false

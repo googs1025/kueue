@@ -148,29 +148,14 @@ func (j *MPIJob) RestorePodSetsInfo(podSetsInfo []podset.PodSetInfo) bool {
 	return changed
 }
 
-func (j *MPIJob) Finished() (metav1.Condition, bool) {
-	var conditionType kubeflow.JobConditionType
-	var finished bool
+func (j *MPIJob) Finished() (message string, success, finished bool) {
 	for _, c := range j.Status.Conditions {
 		if (c.Type == kubeflow.JobSucceeded || c.Type == kubeflow.JobFailed) && c.Status == corev1.ConditionTrue {
-			conditionType = c.Type
-			finished = true
-			break
+			return c.Message, c.Type != kubeflow.JobFailed, true
 		}
 	}
 
-	message := "Job finished successfully"
-	if conditionType == kubeflow.JobFailed {
-		message = "Job failed"
-	}
-	condition := metav1.Condition{
-		Type:    kueue.WorkloadFinished,
-		Status:  metav1.ConditionTrue,
-		Reason:  "JobFinished",
-		Message: message,
-		// ObservedGeneration is added via Update status by the job framework
-	}
-	return condition, finished
+	return "", true, false
 }
 
 // PriorityClass calculates the priorityClass name needed for workload according to the following priorities:

@@ -35,7 +35,6 @@ import (
 )
 
 var _ = ginkgo.Describe("Scheduler", func() {
-
 	var (
 		defaultFlavor *kueue.ResourceFlavor
 		ns            *corev1.Namespace
@@ -51,15 +50,13 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			},
 		}
 		gomega.Expect(k8sClient.Create(ctx, ns)).To(gomega.Succeed())
-
 	})
 
 	ginkgo.AfterEach(func() {
-		gomega.Expect(util.DeleteResourceFlavor(ctx, k8sClient, defaultFlavor)).To(gomega.Succeed())
+		util.ExpectResourceFlavorToBeDeleted(ctx, k8sClient, defaultFlavor, true)
 	})
 
 	ginkgo.When("Preemption is disabled", func() {
-
 		var (
 			cqA      *kueue.ClusterQueue
 			lqA      *kueue.LocalQueue
@@ -95,9 +92,9 @@ var _ = ginkgo.Describe("Scheduler", func() {
 		})
 		ginkgo.AfterEach(func() {
 			gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-			gomega.Expect(util.DeleteClusterQueue(ctx, k8sClient, cqA)).To(gomega.Succeed())
-			gomega.Expect(util.DeleteClusterQueue(ctx, k8sClient, cqB)).To(gomega.Succeed())
-			gomega.Expect(util.DeleteClusterQueue(ctx, k8sClient, cqShared)).To(gomega.Succeed())
+			util.ExpectClusterQueueToBeDeleted(ctx, k8sClient, cqA, true)
+			util.ExpectClusterQueueToBeDeleted(ctx, k8sClient, cqB, true)
+			util.ExpectClusterQueueToBeDeleted(ctx, k8sClient, cqShared, true)
 		})
 
 		ginkgo.It("Admits workloads respecting fair share", func() {
@@ -146,7 +143,6 @@ var _ = ginkgo.Describe("Scheduler", func() {
 	})
 
 	ginkgo.When("Preemption is enabled", func() {
-
 		var (
 			cqA *kueue.ClusterQueue
 			lqA *kueue.LocalQueue
@@ -236,7 +232,6 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectReservingActiveWorkloadsMetric(cqC, 1)
 		})
 	})
-
 })
 
 func finishRunningWorkloadsInCQ(cq *kueue.ClusterQueue, n int) {

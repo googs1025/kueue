@@ -160,16 +160,9 @@ func (j *RayCluster) RestorePodSetsInfo(podSetsInfo []podset.PodSetInfo) bool {
 	return changed
 }
 
-func (j *RayCluster) Finished() (metav1.Condition, bool) {
-	condition := metav1.Condition{
-		Type:               kueue.WorkloadFinished,
-		Status:             metav1.ConditionFalse,
-		Reason:             string(j.Status.State),
-		Message:            j.Status.Reason,
-		ObservedGeneration: j.Generation,
-	}
+func (j *RayCluster) Finished() (message string, success, finished bool) {
 	// Technically a RayCluster is never "finished"
-	return condition, false
+	return j.Status.Reason, j.Status.State != rayv1.Failed, false
 }
 
 func (j *RayCluster) PodsReady() bool {

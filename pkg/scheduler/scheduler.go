@@ -27,11 +27,9 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/field"
@@ -52,6 +50,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/util/priority"
 	"sigs.k8s.io/kueue/pkg/util/resource"
 	"sigs.k8s.io/kueue/pkg/util/routine"
+	"sigs.k8s.io/kueue/pkg/util/wait"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -60,8 +59,6 @@ const (
 )
 
 type Scheduler struct {
-	enableFairSharing bool
-
 	queues                  *queue.Manager
 	cache                   *cache.Cache
 	client                  client.Client
@@ -69,6 +66,7 @@ type Scheduler struct {
 	admissionRoutineWrapper routine.Wrapper
 	preemptor               *preemption.Preemptor
 	workloadOrdering        workload.Ordering
+	fairSharing             config.FairSharing
 
 	// Stubs.
 	applyAdmission func(context.Context, *kueue.Workload) error
@@ -76,7 +74,7 @@ type Scheduler struct {
 
 type options struct {
 	podsReadyRequeuingTimestamp config.RequeuingTimestamp
-	enableFairSharing           bool
+	fairSharing                 config.FairSharing
 }
 
 // Option configures the reconciler.
@@ -94,9 +92,11 @@ func WithPodsReadyRequeuingTimestamp(ts config.RequeuingTimestamp) Option {
 	}
 }
 
-func WithFairSharing(enable bool) Option {
+func WithFairSharing(fs *config.FairSharing) Option {
 	return func(o *options) {
-		o.enableFairSharing = enable
+		if fs != nil {
+			o.fairSharing = *fs
+		}
 	}
 }
 
@@ -109,12 +109,12 @@ func New(queues *queue.Manager, cache *cache.Cache, cl client.Client, recorder r
 		PodsReadyRequeuingTimestamp: options.podsReadyRequeuingTimestamp,
 	}
 	s := &Scheduler{
-		enableFairSharing:       options.enableFairSharing,
+		fairSharing:             options.fairSharing,
 		queues:                  queues,
 		cache:                   cache,
 		client:                  cl,
 		recorder:                recorder,
-		preemptor:               preemption.New(cl, wo, recorder, options.enableFairSharing),
+		preemptor:               preemption.New(cl, wo, recorder, options.fairSharing),
 		admissionRoutineWrapper: routine.DefaultWrapper,
 		workloadOrdering:        wo,
 	}
@@ -126,7 +126,7 @@ func New(queues *queue.Manager, cache *cache.Cache, cl client.Client, recorder r
 func (s *Scheduler) Start(ctx context.Context) error {
 	log := ctrl.LoggerFrom(ctx).WithName("scheduler")
 	ctx = ctrl.LoggerInto(ctx, log)
-	go wait.UntilWithContext(ctx, s.schedule, 0)
+	go wait.UntilWithBackoff(ctx, s.schedule)
 	return nil
 }
 
@@ -159,7 +159,7 @@ func (cu *cohortsUsage) add(cohort string, assignment cache.FlavorResourceQuanti
 }
 
 func (cu *cohortsUsage) totalUsageForCommonFlavorResources(cohort string, assignment cache.FlavorResourceQuantities) cache.FlavorResourceQuantities {
-	return utilmaps.Intersect((*cu)[cohort], assignment, func(a, b cache.ResourceQuantities) cache.ResourceQuantities {
+	return utilmaps.Intersect((*cu)[cohort], assignment, func(a, b workload.Requests) workload.Requests {
 		return utilmaps.Intersect(a, b, func(a, b int64) int64 { return a + b })
 	})
 }
@@ -181,7 +181,7 @@ func (cu *cohortsUsage) hasCommonFlavorResources(cohort string, assignment cache
 	return false
 }
 
-func (s *Scheduler) schedule(ctx context.Context) {
+func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 	log := ctrl.LoggerFrom(ctx)
 
 	// 1. Get the heads from the queues, including their desired clusterQueue.
@@ -189,7 +189,7 @@ func (s *Scheduler) schedule(ctx context.Context) {
 	headWorkloads := s.queues.Heads(ctx)
 	// If there are no elements, it means that the program is finishing.
 	if len(headWorkloads) == 0 {
-		return
+		return wait.KeepGoing
 	}
 	startTime := time.Now()
 
@@ -202,7 +202,7 @@ func (s *Scheduler) schedule(ctx context.Context) {
 
 	// 4. Sort entries based on borrowing, priorities (if enabled) and timestamps.
 	sort.Sort(entryOrdering{
-		enableFairSharing: s.enableFairSharing,
+		enableFairSharing: s.fairSharing.Enable,
 		entries:           entries,
 		workloadOrdering:  s.workloadOrdering,
 	})
@@ -296,6 +296,10 @@ func (s *Scheduler) schedule(ctx context.Context) {
 		}
 	}
 	metrics.AdmissionAttempt(result, time.Since(startTime))
+	if result != metrics.AdmissionResultSuccess {
+		return wait.SlowDown
+	}
+	return wait.KeepGoing
 }
 
 type entryStatus string
@@ -357,8 +361,8 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 			e.assignment, e.preemptionTargets = s.getAssignments(log, &e.Info, &snap)
 			e.inadmissibleMsg = e.assignment.Message()
 			e.Info.LastAssignment = &e.assignment.LastState
-			if s.enableFairSharing {
-				e.dominantResourceShare, e.dominantResourceName = cq.DominantResourceShareWith(&w)
+			if s.fairSharing.Enable {
+				e.dominantResourceShare, e.dominantResourceName = cq.DominantResourceShareWith(e.assignment.TotalRequestsFor(&w))
 			}
 		}
 		entries = append(entries, e)
@@ -392,7 +396,6 @@ func resourcesToReserve(e *entry, cq *cache.ClusterQueue) cache.FlavorResourceQu
 					reservedUsage[flavor][resource] = min(usage, cqQuota.Nominal+*cqQuota.BorrowingLimit-cq.Usage[flavor][resource])
 				}
 			}
-
 		}
 	}
 	return reservedUsage
@@ -405,7 +408,7 @@ type partialAssignment struct {
 
 func (s *Scheduler) getAssignments(log logr.Logger, wl *workload.Info, snap *cache.Snapshot) (flavorassigner.Assignment, []*workload.Info) {
 	cq := snap.ClusterQueues[wl.ClusterQueue]
-	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, s.enableFairSharing)
+	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, s.fairSharing.Enable)
 	fullAssignment := flvAssigner.Assign(log, nil)
 	var faPreemtionTargets []*workload.Info
 
@@ -431,11 +434,9 @@ func (s *Scheduler) getAssignments(log logr.Logger, wl *workload.Info, snap *cac
 			}
 			preemptionTargets := s.preemptor.GetTargets(*wl, assignment, snap)
 			if len(preemptionTargets) > 0 {
-
 				return &partialAssignment{assignment: assignment, preemptionTargets: preemptionTargets}, true
 			}
 			return nil, false
-
 		})
 		if pa, found := reducer.Search(); found {
 			return pa.assignment, pa.preemptionTargets
@@ -528,16 +529,16 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *cache.ClusterQueue)
 	s.admissionRoutineWrapper.Run(func() {
 		err := s.applyAdmission(ctx, newWorkload)
 		if err == nil {
-			waitStarted := e.Obj.CreationTimestamp.Time
-			if c := apimeta.FindStatusCondition(e.Obj.Status.Conditions, kueue.WorkloadEvicted); c != nil {
-				waitStarted = c.LastTransitionTime.Time
-			}
-			waitTime := time.Since(waitStarted)
+			waitTime := workload.QueuedWaitTime(newWorkload)
 			s.recorder.Eventf(newWorkload, corev1.EventTypeNormal, "QuotaReserved", "Quota reserved in ClusterQueue %v, wait time since queued was %.0fs", admission.ClusterQueue, waitTime.Seconds())
+			metrics.QuotaReservedWorkload(admission.ClusterQueue, waitTime)
 			if workload.IsAdmitted(newWorkload) {
-				s.recorder.Eventf(newWorkload, corev1.EventTypeNormal, "Admitted", "Admitted by ClusterQueue %v, wait time since reservation was 0s ", admission.ClusterQueue)
+				s.recorder.Eventf(newWorkload, corev1.EventTypeNormal, "Admitted", "Admitted by ClusterQueue %v, wait time since reservation was 0s", admission.ClusterQueue)
+				metrics.AdmittedWorkload(admission.ClusterQueue, waitTime)
+				if len(newWorkload.Status.AdmissionChecks) > 0 {
+					metrics.AdmissionChecksWaitTime(admission.ClusterQueue, 0)
+				}
 			}
-			metrics.AdmittedWorkload(admission.ClusterQueue, waitTime)
 			log.V(2).Info("Workload successfully admitted and assigned flavors", "assignments", admission.PodSetAssignments)
 			return
 		}

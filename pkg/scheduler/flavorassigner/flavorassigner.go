@@ -105,6 +105,22 @@ func (a *Assignment) ToAPI() []kueue.PodSetAssignment {
 	return psFlavors
 }
 
+func (a *Assignment) TotalRequestsFor(wl *workload.Info) cache.FlavorResourceQuantities {
+	usage := make(cache.FlavorResourceQuantities)
+	for i, ps := range wl.TotalRequests {
+		for res, q := range ps.Requests {
+			flv := a.PodSets[i].Flavors[res].Name
+			resUsage := usage[flv]
+			if resUsage == nil {
+				resUsage = make(map[corev1.ResourceName]int64)
+				usage[flv] = resUsage
+			}
+			resUsage[res] += q
+		}
+	}
+	return usage
+}
+
 type Status struct {
 	reasons []string
 	err     error
@@ -364,7 +380,7 @@ func (a *Assignment) append(requests workload.Requests, psAssignment *PodSetAssi
 // reasons or failure.
 func (a *FlavorAssigner) findFlavorForPodSetResource(
 	log logr.Logger,
-	psId int,
+	psID int,
 	requests workload.Requests,
 	resName corev1.ResourceName,
 	assignmentUsage cache.FlavorResourceQuantities,
@@ -378,7 +394,7 @@ func (a *FlavorAssigner) findFlavorForPodSetResource(
 
 	status := &Status{}
 	requests = filterRequestedResources(requests, resourceGroup.CoveredResources)
-	podSpec := &a.wl.Obj.Spec.PodSets[psId].Template.Spec
+	podSpec := &a.wl.Obj.Spec.PodSets[psID].Template.Spec
 
 	var bestAssignment ResourceAssignment
 	bestAssignmentMode := NoFit
@@ -386,7 +402,7 @@ func (a *FlavorAssigner) findFlavorForPodSetResource(
 	// We will only check against the flavors' labels for the resource.
 	selector := flavorSelector(podSpec, resourceGroup.LabelKeys)
 	assignedFlavorIdx := -1
-	idx := a.wl.LastAssignment.NextFlavorToTryForPodSetResource(psId, resName)
+	idx := a.wl.LastAssignment.NextFlavorToTryForPodSetResource(psID, resName)
 	for ; idx < len(resourceGroup.Flavors); idx++ {
 		flvQuotas := resourceGroup.Flavors[idx]
 		flavor, exist := a.resourceFlavors[flvQuotas.Name]
@@ -449,14 +465,12 @@ func (a *FlavorAssigner) findFlavorForPodSetResource(
 				bestAssignment = assignments
 				bestAssignmentMode = representativeMode
 			}
-		} else {
-			if representativeMode > bestAssignmentMode {
-				bestAssignment = assignments
-				bestAssignmentMode = representativeMode
-				if bestAssignmentMode == Fit {
-					// All the resources fit in the cohort, no need to check more flavors.
-					return bestAssignment, nil
-				}
+		} else if representativeMode > bestAssignmentMode {
+			bestAssignment = assignments
+			bestAssignmentMode = representativeMode
+			if bestAssignmentMode == Fit {
+				// All the resources fit in the cohort, no need to check more flavors.
+				return bestAssignment, nil
 			}
 		}
 	}

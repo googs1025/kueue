@@ -441,11 +441,29 @@ func ExpectReservingActiveWorkloadsMetric(cq *kueue.ClusterQueue, v int) {
 
 func ExpectAdmittedWorkloadsTotalMetric(cq *kueue.ClusterQueue, v int) {
 	metric := metrics.AdmittedWorkloadsTotal.WithLabelValues(cq.Name)
-	gomega.EventuallyWithOffset(1, func() int {
-		v, err := testutil.GetCounterMetricValue(metric)
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		return int(v)
-	}, Timeout, Interval).Should(gomega.Equal(v))
+	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
+		count, err := testutil.GetCounterMetricValue(metric)
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		g.Expect(int(count)).Should(gomega.Equal(v))
+	}, Timeout, Interval).Should(gomega.Succeed())
+}
+
+func ExpectEvictedWorkloadsTotalMetric(cqName string, reason string, v int) {
+	metric := metrics.EvictedWorkloadsTotal.WithLabelValues(cqName, reason)
+	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
+		count, err := testutil.GetCounterMetricValue(metric)
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		g.Expect(int(count)).Should(gomega.Equal(v))
+	}, Timeout, Interval).Should(gomega.Succeed())
+}
+
+func ExpectQuotaReservedWorkloadsTotalMetric(cq *kueue.ClusterQueue, v int) {
+	metric := metrics.QuotaReservedWorkloadsTotal.WithLabelValues(cq.Name)
+	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
+		count, err := testutil.GetCounterMetricValue(metric)
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		g.Expect(int(count)).Should(gomega.Equal(v))
+	}, Timeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectClusterQueueStatusMetric(cq *kueue.ClusterQueue, status metrics.ClusterQueueStatus) {
@@ -660,6 +678,20 @@ func SetPodsPhase(ctx context.Context, k8sClient client.Client, phase corev1.Pod
 	}
 }
 
+func BindPodWithNode(ctx context.Context, k8sClient client.Client, nodeName string, pods ...*corev1.Pod) {
+	for _, p := range pods {
+		updatedPod := corev1.Pod{}
+		gomega.ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKeyFromObject(p), &updatedPod)).To(gomega.Succeed())
+		binding := corev1.Binding{
+			Target: corev1.ObjectReference{
+				Kind: "Node",
+				Name: nodeName,
+			},
+		}
+		gomega.ExpectWithOffset(1, k8sClient.SubResource("binding").Create(ctx, &updatedPod, &binding)).To(gomega.Succeed())
+	}
+}
+
 func ExpectPodUnsuspendedWithNodeSelectors(ctx context.Context, k8sClient client.Client, key types.NamespacedName, ns map[string]string) {
 	createdPod := &corev1.Pod{}
 	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
@@ -685,7 +717,6 @@ func ExpectEventsForObjects(eventWatcher watch.Interface, objs sets.Set[types.Na
 readCh:
 	for !gotObjs.Equal(objs) {
 		select {
-
 		case evt, ok := <-eventWatcher.ResultChan():
 			gomega.Expect(ok).To(gomega.BeTrue())
 			event, ok := evt.Object.(*corev1.Event)

@@ -32,6 +32,7 @@ import (
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
+	utilResource "sigs.k8s.io/kueue/pkg/util/resource"
 )
 
 // PriorityClassWrapper wraps a PriorityClass.
@@ -430,6 +431,11 @@ func (p *PodSetWrapper) NodeSelector(kv map[string]string) *PodSetWrapper {
 	return p
 }
 
+func (p *PodSetWrapper) NodeName(name string) *PodSetWrapper {
+	p.Template.Spec.NodeName = name
+	return p
+}
+
 func (p *PodSetWrapper) Labels(kv map[string]string) *PodSetWrapper {
 	p.Template.Labels = kv
 	return p
@@ -516,6 +522,21 @@ func MakeLocalQueue(name, ns string) *LocalQueueWrapper {
 	}}
 }
 
+// Creation sets the creation timestamp of the LocalQueue.
+func (q *LocalQueueWrapper) Creation(t time.Time) *LocalQueueWrapper {
+	q.CreationTimestamp = metav1.NewTime(t)
+	return q
+}
+
+// Label sets the label on the LocalQueue.
+func (q *LocalQueueWrapper) Label(k, v string) *LocalQueueWrapper {
+	if q.Labels == nil {
+		q.Labels = make(map[string]string)
+	}
+	q.Labels[k] = v
+	return q
+}
+
 // Obj returns the inner LocalQueue.
 func (q *LocalQueueWrapper) Obj() *kueue.LocalQueue {
 	return &q.LocalQueue
@@ -530,6 +551,12 @@ func (q *LocalQueueWrapper) ClusterQueue(c string) *LocalQueueWrapper {
 // PendingWorkloads updates the pendingWorkloads in status.
 func (q *LocalQueueWrapper) PendingWorkloads(n int32) *LocalQueueWrapper {
 	q.Status.PendingWorkloads = n
+	return q
+}
+
+// AdmittedWorkloads updates the admittedWorkloads in status.
+func (q *LocalQueueWrapper) AdmittedWorkloads(n int32) *LocalQueueWrapper {
+	q.Status.AdmittedWorkloads = n
 	return q
 }
 
@@ -661,6 +688,14 @@ func (c *ClusterQueueWrapper) Label(k, v string) *ClusterQueueWrapper {
 	return c
 }
 
+func (c *ClusterQueueWrapper) FairWeight(w resource.Quantity) *ClusterQueueWrapper {
+	if c.Spec.FairSharing == nil {
+		c.Spec.FairSharing = &kueue.FairSharing{}
+	}
+	c.Spec.FairSharing.Weight = ptr.To(w)
+	return c
+}
+
 // Condition sets a condition on the ClusterQueue.
 func (c *ClusterQueueWrapper) Condition(conditionType string, status metav1.ConditionStatus, reason, message string) *ClusterQueueWrapper {
 	apimeta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
@@ -675,6 +710,24 @@ func (c *ClusterQueueWrapper) Condition(conditionType string, status metav1.Cond
 // Generation sets the generation of the ClusterQueue.
 func (c *ClusterQueueWrapper) Generation(num int64) *ClusterQueueWrapper {
 	c.ObjectMeta.Generation = num
+	return c
+}
+
+// Creation sets the creation timestamp of the ClusterQueue.
+func (c *ClusterQueueWrapper) Creation(t time.Time) *ClusterQueueWrapper {
+	c.CreationTimestamp = metav1.NewTime(t)
+	return c
+}
+
+// PendingWorkloads sets the pendingWorkloads in status.
+func (c *ClusterQueueWrapper) PendingWorkloads(n int32) *ClusterQueueWrapper {
+	c.Status.PendingWorkloads = n
+	return c
+}
+
+// AdmittedWorkloads sets the admittedWorkloads in status.
+func (c *ClusterQueueWrapper) AdmittedWorkloads(n int32) *ClusterQueueWrapper {
+	c.Status.AdmittedWorkloads = n
 	return c
 }
 
@@ -818,7 +871,7 @@ func (lr *LimitRangeWrapper) WithValue(member string, t corev1.ResourceName, q s
 	case "Default":
 		target = lr.Spec.Limits[0].Default
 	case "Max":
-	//nothing
+	// nothing
 	default:
 		panic("Unexpected member " + member)
 	}
@@ -918,6 +971,22 @@ func (ac *AdmissionCheckWrapper) SingleInstanceInClusterQueue(singleInstance boo
 	return ac
 }
 
+func (ac *AdmissionCheckWrapper) ApplyToAllFlavors(applyToAllFlavors bool, reason, message string, observedGeneration int64) *AdmissionCheckWrapper {
+	cond := metav1.Condition{
+		Type:               kueue.FlavorIndependentAdmissionCheck,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: observedGeneration,
+	}
+	if !applyToAllFlavors {
+		cond.Status = metav1.ConditionFalse
+	}
+
+	apimeta.SetStatusCondition(&ac.Status.Conditions, cond)
+	return ac
+}
+
 func (ac *AdmissionCheckWrapper) Obj() *kueue.AdmissionCheck {
 	return &ac.AdmissionCheck
 }
@@ -988,10 +1057,10 @@ func (mkc *MultiKueueClusterWrapper) Obj() *kueuealpha.MultiKueueCluster {
 	return &mkc.MultiKueueCluster
 }
 
-func (mkc *MultiKueueClusterWrapper) KubeConfig(LocationType kueuealpha.LocationType, location string) *MultiKueueClusterWrapper {
+func (mkc *MultiKueueClusterWrapper) KubeConfig(locationType kueuealpha.LocationType, location string) *MultiKueueClusterWrapper {
 	mkc.Spec.KubeConfig = kueuealpha.KubeConfig{
 		Location:     location,
-		LocationType: LocationType,
+		LocationType: locationType,
 	}
 	return mkc
 }
@@ -1012,4 +1081,40 @@ func (mkc *MultiKueueClusterWrapper) Active(state metav1.ConditionStatus, reason
 func (mkc *MultiKueueClusterWrapper) Generation(num int64) *MultiKueueClusterWrapper {
 	mkc.ObjectMeta.Generation = num
 	return mkc
+}
+
+// ContainerWrapper wraps a corev1.Container.
+type ContainerWrapper struct{ corev1.Container }
+
+// MakeContainer wraps a ContainerWrapper with an empty ResourceList.
+func MakeContainer() *ContainerWrapper {
+	return &ContainerWrapper{
+		corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{},
+			},
+		},
+	}
+}
+
+// Obj returns the inner corev1.Container.
+func (c *ContainerWrapper) Obj() *corev1.Container {
+	return &c.Container
+}
+
+// WithResourceReq appends a resource request to the container.
+func (c *ContainerWrapper) WithResourceReq(resourceName corev1.ResourceName, quantity string) *ContainerWrapper {
+	requests := utilResource.MergeResourceListKeepFirst(c.Container.Resources.Requests, corev1.ResourceList{
+		resourceName: resource.MustParse(quantity),
+	})
+	c.Container.Resources.Requests = requests
+
+	return c
+}
+
+// AsSidecar makes the container a sidecar when used as an Init Container.
+func (c *ContainerWrapper) AsSidecar() *ContainerWrapper {
+	c.Container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)
+
+	return c
 }

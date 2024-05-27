@@ -51,7 +51,8 @@ const (
 )
 
 type options struct {
-	podsReadyTracking bool
+	podsReadyTracking   bool
+	workloadInfoOptions []workload.InfoOption
 }
 
 // Option configures the reconciler.
@@ -66,6 +67,12 @@ func WithPodsReadyTracking(f bool) Option {
 	}
 }
 
+func WithExcludedResourcePrefixes(excludedPrefixes []string) Option {
+	return func(o *options) {
+		o.workloadInfoOptions = append(o.workloadInfoOptions, workload.WithExcludedResourcePrefixes(excludedPrefixes))
+	}
+}
+
 var defaultOptions = options{}
 
 // Cache keeps track of the Workloads that got admitted through ClusterQueues.
@@ -73,13 +80,14 @@ type Cache struct {
 	sync.RWMutex
 	podsReadyCond sync.Cond
 
-	client            client.Client
-	clusterQueues     map[string]*ClusterQueue
-	cohorts           map[string]*Cohort
-	assumedWorkloads  map[string]string
-	resourceFlavors   map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
-	podsReadyTracking bool
-	admissionChecks   map[string]AdmissionCheck
+	client              client.Client
+	clusterQueues       map[string]*ClusterQueue
+	cohorts             map[string]*Cohort
+	assumedWorkloads    map[string]string
+	resourceFlavors     map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
+	podsReadyTracking   bool
+	admissionChecks     map[string]AdmissionCheck
+	workloadInfoOptions []workload.InfoOption
 }
 
 func New(client client.Client, opts ...Option) *Cache {
@@ -88,13 +96,14 @@ func New(client client.Client, opts ...Option) *Cache {
 		opt(&options)
 	}
 	c := &Cache{
-		client:            client,
-		clusterQueues:     make(map[string]*ClusterQueue),
-		cohorts:           make(map[string]*Cohort),
-		assumedWorkloads:  make(map[string]string),
-		resourceFlavors:   make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor),
-		admissionChecks:   make(map[string]AdmissionCheck),
-		podsReadyTracking: options.podsReadyTracking,
+		client:              client,
+		clusterQueues:       make(map[string]*ClusterQueue),
+		cohorts:             make(map[string]*Cohort),
+		assumedWorkloads:    make(map[string]string),
+		resourceFlavors:     make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor),
+		admissionChecks:     make(map[string]AdmissionCheck),
+		podsReadyTracking:   options.podsReadyTracking,
+		workloadInfoOptions: options.workloadInfoOptions,
 	}
 	c.podsReadyCond.L = &c.RWMutex
 	return c
@@ -102,11 +111,12 @@ func New(client client.Client, opts ...Option) *Cache {
 
 func (c *Cache) newClusterQueue(cq *kueue.ClusterQueue) (*ClusterQueue, error) {
 	cqImpl := &ClusterQueue{
-		Name:              cq.Name,
-		Workloads:         make(map[string]*workload.Info),
-		WorkloadsNotReady: sets.New[string](),
-		localQueues:       make(map[string]*queue),
-		podsReadyTracking: c.podsReadyTracking,
+		Name:                cq.Name,
+		Workloads:           make(map[string]*workload.Info),
+		WorkloadsNotReady:   sets.New[string](),
+		localQueues:         make(map[string]*queue),
+		podsReadyTracking:   c.podsReadyTracking,
+		workloadInfoOptions: c.workloadInfoOptions,
 	}
 	if err := cqImpl.update(cq, c.resourceFlavors, c.admissionChecks); err != nil {
 		return nil, err
@@ -211,6 +221,7 @@ func (c *Cache) AddOrUpdateAdmissionCheck(ac *kueue.AdmissionCheck) sets.Set[str
 		Active:                       apimeta.IsStatusConditionTrue(ac.Status.Conditions, kueue.AdmissionCheckActive),
 		Controller:                   ac.Spec.ControllerName,
 		SingleInstanceInClusterQueue: apimeta.IsStatusConditionTrue(ac.Status.Conditions, kueue.AdmissionChecksSingleInstanceInClusterQueue),
+		FlavorIndependent:            apimeta.IsStatusConditionTrue(ac.Status.Conditions, kueue.FlavorIndependentAdmissionCheck),
 	}
 
 	return c.updateClusterQueues()
@@ -221,6 +232,22 @@ func (c *Cache) DeleteAdmissionCheck(ac *kueue.AdmissionCheck) sets.Set[string] 
 	defer c.Unlock()
 	delete(c.admissionChecks, ac.Name)
 	return c.updateClusterQueues()
+}
+
+func (c *Cache) AdmissionChecksForClusterQueue(cqName string) []AdmissionCheck {
+	c.RLock()
+	defer c.RUnlock()
+	cq, ok := c.clusterQueues[cqName]
+	if !ok || len(cq.AdmissionChecks) == 0 {
+		return nil
+	}
+	acs := make([]AdmissionCheck, 0, len(cq.AdmissionChecks))
+	for acName := range cq.AdmissionChecks {
+		if ac, ok := c.admissionChecks[acName]; ok {
+			acs = append(acs, ac)
+		}
+	}
+	return acs
 }
 
 func (c *Cache) ClusterQueueActive(name string) bool {
@@ -283,7 +310,7 @@ func (c *Cache) AddClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) err
 	defer c.Unlock()
 
 	if _, ok := c.clusterQueues[cq.Name]; ok {
-		return fmt.Errorf("ClusterQueue already exists")
+		return errors.New("ClusterQueue already exists")
 	}
 	cqImpl, err := c.newClusterQueue(cq)
 	if err != nil {
@@ -442,7 +469,7 @@ func (c *Cache) UpdateWorkload(oldWl, newWl *kueue.Workload) error {
 	if workload.HasQuotaReservation(oldWl) {
 		cq, ok := c.clusterQueues[string(oldWl.Status.Admission.ClusterQueue)]
 		if !ok {
-			return fmt.Errorf("old ClusterQueue doesn't exist")
+			return errors.New("old ClusterQueue doesn't exist")
 		}
 		cq.deleteWorkload(oldWl)
 	}
@@ -453,7 +480,7 @@ func (c *Cache) UpdateWorkload(oldWl, newWl *kueue.Workload) error {
 	}
 	cq, ok := c.clusterQueues[string(newWl.Status.Admission.ClusterQueue)]
 	if !ok {
-		return fmt.Errorf("new ClusterQueue doesn't exist")
+		return errors.New("new ClusterQueue doesn't exist")
 	}
 	if c.podsReadyTracking {
 		c.podsReadyCond.Broadcast()
@@ -526,7 +553,7 @@ func (c *Cache) ForgetWorkload(w *kueue.Workload) error {
 	defer c.Unlock()
 
 	if _, assumed := c.assumedWorkloads[workload.Key(w)]; !assumed {
-		return fmt.Errorf("the workload is not assumed")
+		return errors.New("the workload is not assumed")
 	}
 	c.cleanupAssumedState(w)
 

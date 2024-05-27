@@ -262,6 +262,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadEvicted,
 						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadEvictedByDeactivation,
+						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
 					Admitted(true).
@@ -309,12 +311,15 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadEvicted,
 						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadEvictedByDeactivation,
+						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             "Pending",
+						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
 					Admitted(true).
@@ -325,13 +330,19 @@ func TestReconciler(t *testing.T) {
 						Message:            "The workload has no reservation",
 						ObservedGeneration: 1,
 					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadRequeued,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadEvictedByDeactivation,
+						Message:            "The workload was deactivated",
+						ObservedGeneration: 1,
+					}).
 					Obj(),
 			},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-
 			ctx, _ := utiltesting.ContextWithLog(t)
 			clientBuilder := utiltesting.NewClientBuilder(rayv1.AddToScheme).WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: utiltesting.TreatSSAAsStrategicMerge})
 

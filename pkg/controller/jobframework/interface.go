@@ -17,6 +17,7 @@ import (
 	"context"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -44,7 +45,7 @@ type GenericJob interface {
 	// Finished means whether the job is completed/failed or not,
 	// condition represents the workload finished condition.
 	// Observed generation of the workload is set by the jobframework.
-	Finished() (condition metav1.Condition, finished bool)
+	Finished() (message string, success, finished bool)
 	// PodSets will build workload podSets corresponding to the job.
 	PodSets() []kueue.PodSet
 	// IsActive returns true if there are any running pods.
@@ -63,13 +64,13 @@ type JobWithReclaimablePods interface {
 	ReclaimablePods() ([]kueue.ReclaimablePod, error)
 }
 
-type StopReason int
+type StopReason string
 
 const (
-	StopReasonWorkloadDeleted StopReason = iota
-	StopReasonWorkloadEvicted
-	StopReasonNoMatchingWorkload
-	StopReasonNotAdmitted
+	StopReasonWorkloadDeleted    StopReason = "WorkloadDeleted"
+	StopReasonWorkloadEvicted    StopReason = "WorkloadEvicted"
+	StopReasonNoMatchingWorkload StopReason = "NoMatchingWorkload"
+	StopReasonNotAdmitted        StopReason = "NotAdmitted"
 )
 
 type JobWithCustomStop interface {
@@ -112,6 +113,15 @@ type ComposableJob interface {
 	FindMatchingWorkloads(ctx context.Context, c client.Client, r record.EventRecorder) (match *kueue.Workload, toDelete []*kueue.Workload, err error)
 	// Stop implements the custom stop procedure for ComposableJob
 	Stop(ctx context.Context, c client.Client, podSetsInfo []podset.PodSetInfo, stopReason StopReason, eventMsg string) ([]client.Object, error)
+	// Calls f on each member of the ComposableJob
+	ForEach(f func(obj runtime.Object))
+}
+
+// JobWithCustomWorkloadConditions interface should be implemented by generic jobs,
+// when custom workload conditions should be updated after ensure that the workload exists.
+type JobWithCustomWorkloadConditions interface {
+	// CustomWorkloadConditions return custom workload conditions and status changed or not.
+	CustomWorkloadConditions(wl *kueue.Workload) ([]metav1.Condition, bool)
 }
 
 func QueueName(job GenericJob) string {

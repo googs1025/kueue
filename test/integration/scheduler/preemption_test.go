@@ -136,6 +136,7 @@ var _ = ginkgo.Describe("Preemption", func() {
 			gomega.Expect(k8sClient.Create(ctx, highWl2)).To(gomega.Succeed())
 
 			util.FinishEvictionForWorkloads(ctx, k8sClient, lowWl1, lowWl2)
+			util.ExpectEvictedWorkloadsTotalMetric(cq.Name, kueue.WorkloadEvictedByPreemption, 2)
 
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, cq.Name, highWl2)
 			util.ExpectWorkloadsToBePending(ctx, k8sClient, lowWl1, lowWl2)
@@ -535,7 +536,6 @@ var _ = ginkgo.Describe("Preemption", func() {
 			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptorBetaWl)
 			util.ExpectWorkloadsToBePending(ctx, k8sClient, useAllAlphaWl, pendingAlphaWl)
 		})
-
 	})
 
 	ginkgo.Context("When most quota is in a shared ClusterQueue in a cohort", func() {
@@ -726,7 +726,6 @@ var _ = ginkgo.Describe("Preemption", func() {
 			util.ExpectWorkloadToBeAdmittedAs(ctx, k8sClient, bBestEffortLowWl,
 				testing.MakeAdmission(bBestEffortCQ.Name).Assignment(corev1.ResourceCPU, "one", "1").Obj(),
 			)
-
 		})
 	})
 
@@ -791,5 +790,4 @@ var _ = ginkgo.Describe("Preemption", func() {
 				testing.MakeAdmission(prodCQ.Name).Assignment(corev1.ResourceCPU, "alpha", "4").Obj())
 		})
 	})
-
 })

@@ -437,6 +437,66 @@ current state.</p>
 </tbody>
 </table>
 
+## `AdmissionCheckStrategyRule`     {#kueue-x-k8s-io-v1beta1-AdmissionCheckStrategyRule}
+    
+
+**Appears in:**
+
+- [AdmissionChecksStrategy](#kueue-x-k8s-io-v1beta1-AdmissionChecksStrategy)
+
+
+<p>AdmissionCheckStrategyRule defines rules for a single AdmissionCheck</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>name</code> <B>[Required]</B><br/>
+<code>string</code>
+</td>
+<td>
+   <p>name is an AdmissionCheck's name.</p>
+</td>
+</tr>
+<tr><td><code>onFlavors</code><br/>
+<a href="#kueue-x-k8s-io-v1beta1-ResourceFlavorReference"><code>[]ResourceFlavorReference</code></a>
+</td>
+<td>
+   <p>onFlavors is a list of ResourceFlavors' names that this AdmissionCheck should run for.
+If empty, the AdmissionCheck will run for all workloads submitted to the ClusterQueue.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `AdmissionChecksStrategy`     {#kueue-x-k8s-io-v1beta1-AdmissionChecksStrategy}
+    
+
+**Appears in:**
+
+- [ClusterQueueSpec](#kueue-x-k8s-io-v1beta1-ClusterQueueSpec)
+
+
+<p>AdmissionCheckStrategy defines a strategy for a AdmissionCheck.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>admissionChecks</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta1-AdmissionCheckStrategyRule"><code>[]AdmissionCheckStrategyRule</code></a>
+</td>
+<td>
+   <p>admissionChecks is a list of strategies for AdmissionChecks</p>
+</td>
+</tr>
+</tbody>
+</table>
+
 ## `BorrowWithinCohort`     {#kueue-x-k8s-io-v1beta1-BorrowWithinCohort}
     
 
@@ -748,7 +808,7 @@ reclaim its nominal quota.</li>
 and there are admitted Workloads in the ClusterQueue with lower priority.</li>
 </ul>
 <p>The preemption algorithm tries to find a minimal set of Workloads to
-preempt to accommodate the pending Workload, preempting Workloads with
+preempt to accomomdate the pending Workload, preempting Workloads with
 lower priority first.</p>
 </td>
 </tr>
@@ -756,7 +816,16 @@ lower priority first.</p>
 <code>[]string</code>
 </td>
 <td>
-   <p>admissionChecks lists the AdmissionChecks required by this ClusterQueue</p>
+   <p>admissionChecks lists the AdmissionChecks required by this ClusterQueue.
+Cannot be used along with AdmissionCheckStrategy.</p>
+</td>
+</tr>
+<tr><td><code>admissionChecksStrategy</code><br/>
+<a href="#kueue-x-k8s-io-v1beta1-AdmissionChecksStrategy"><code>AdmissionChecksStrategy</code></a>
+</td>
+<td>
+   <p>admissionCheckStrategy defines a list of strategies to determine which ResourceFlavors require AdmissionChecks.
+This property cannot be used in conjunction with the 'admissionChecks' property.</p>
 </td>
 </tr>
 <tr><td><code>stopPolicy</code><br/>
@@ -771,6 +840,14 @@ made.</p>
 <li>HoldAndDrain - Admitted workloads are evicted and Reserving workloads will cancel the reservation.</li>
 <li>Hold - Admitted workloads will run to completion and Reserving workloads will cancel the reservation.</li>
 </ul>
+</td>
+</tr>
+<tr><td><code>fairSharing</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta1-FairSharing"><code>FairSharing</code></a>
+</td>
+<td>
+   <p>fairSharing defines the properties of the ClusterQueue when participating in fair sharing.
+The values are only relevant if fair sharing is enabled in the Kueue configuration.</p>
 </td>
 </tr>
 </tbody>
@@ -846,6 +923,39 @@ current state.</p>
 <td>
    <p>PendingWorkloadsStatus contains the information exposed about the current
 status of the pending workloads in the cluster queue.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `FairSharing`     {#kueue-x-k8s-io-v1beta1-FairSharing}
+    
+
+**Appears in:**
+
+- [ClusterQueueSpec](#kueue-x-k8s-io-v1beta1-ClusterQueueSpec)
+
+
+<p>FairSharing contains the properties of the ClusterQueue when participating in fair sharing.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>weight</code> <B>[Required]</B><br/>
+<a href="https://pkg.go.dev/k8s.io/apimachinery/pkg/api/resource#Quantity"><code>k8s.io/apimachinery/pkg/api/resource.Quantity</code></a>
+</td>
+<td>
+   <p>weight gives a comparative advantage to this ClusterQueue when competing for unused
+resources in the cohort against other ClusterQueues.
+The share of a ClusterQueue is based on the dominant resource usage above nominal
+quotas for each resource, divided by the weight.
+Admission prioritizes scheduling workloads from ClusterQueues with the lowest share
+and preempting workloads from the ClusterQueues with the highest share.
+A zero weight implies infinite share value, meaning that this ClusterQueue will always
+be at disadvantage against other ClusterQueues.</p>
 </td>
 </tr>
 </tbody>
@@ -1447,6 +1557,8 @@ this time would be reset to null.</p>
 (Alias of `string`)
 
 **Appears in:**
+
+- [AdmissionCheckStrategyRule](#kueue-x-k8s-io-v1beta1-AdmissionCheckStrategyRule)
 
 - [FlavorQuotas](#kueue-x-k8s-io-v1beta1-FlavorQuotas)
 

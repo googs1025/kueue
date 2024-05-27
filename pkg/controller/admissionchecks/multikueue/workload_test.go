@@ -467,7 +467,7 @@ func TestWlReconcile(t *testing.T) {
 					AdmissionCheck(kueue.AdmissionCheckState{
 						Name:               "ac1",
 						State:              kueue.CheckStateReady,
-						LastTransitionTime: metav1.NewTime(time.Now().Add(-defaultWorkerLostTimeout / 2)), //50% of the timeout
+						LastTransitionTime: metav1.NewTime(time.Now().Add(-defaultWorkerLostTimeout / 2)), // 50% of the timeout
 						Message:            `The workload got reservation on "worker1"`,
 					}).
 					ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "job1", "uid1").
@@ -605,7 +605,7 @@ func TestWlReconcile(t *testing.T) {
 				*baseWorkloadBuilder.Clone().
 					Label(kueuealpha.MultiKueueOriginLabel, defaultOrigin).
 					ReserveQuota(utiltesting.MakeAdmission("q1").Obj()).
-					QuotaReservedTime(time.Now().Add(-time.Minute)). //one minute ago
+					QuotaReservedTime(time.Now().Add(-time.Minute)). // one minute ago
 					Obj(),
 			},
 			worker2Jobs: []batchv1.Job{
@@ -662,7 +662,7 @@ func TestWlReconcile(t *testing.T) {
 
 			managerClient := manageBuilder.Build()
 
-			cRec := newClustersReconciler(managerClient, TestNamespace, 0, defaultOrigin)
+			cRec := newClustersReconciler(managerClient, TestNamespace, 0, defaultOrigin, nil)
 
 			worker1Builder, _ := getClientBuilder()
 			worker1Builder = worker1Builder.WithLists(&kueue.WorkloadList{Items: tc.worker1Workloads}, &batchv1.JobList{Items: tc.worker1Jobs})
@@ -704,7 +704,6 @@ func TestWlReconcile(t *testing.T) {
 					w2remoteClient.pendingReconnect.Store(true)
 				}
 				cRec.remoteClients["worker2"] = w2remoteClient
-
 			}
 
 			helper, _ := newMultiKueueStoreHelper(managerClient)

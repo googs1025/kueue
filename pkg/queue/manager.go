@@ -36,13 +36,14 @@ import (
 )
 
 var (
-	errQueueDoesNotExist         = errors.New("queue doesn't exist")
+	ErrQueueDoesNotExist         = errors.New("queue doesn't exist")
 	errClusterQueueDoesNotExist  = errors.New("clusterQueue doesn't exist")
 	errClusterQueueAlreadyExists = errors.New("clusterQueue already exists")
 )
 
 type options struct {
 	podsReadyRequeuingTimestamp config.RequeuingTimestamp
+	workloadInfoOptions         []workload.InfoOption
 }
 
 // Option configures the manager.
@@ -50,6 +51,7 @@ type Option func(*options)
 
 var defaultOptions = options{
 	podsReadyRequeuingTimestamp: config.EvictionTimestamp,
+	workloadInfoOptions:         []workload.InfoOption{},
 }
 
 // WithPodsReadyRequeuingTimestamp sets the timestamp that is used for ordering
@@ -57,6 +59,13 @@ var defaultOptions = options{
 func WithPodsReadyRequeuingTimestamp(ts config.RequeuingTimestamp) Option {
 	return func(o *options) {
 		o.podsReadyRequeuingTimestamp = ts
+	}
+}
+
+// WithExcludedResourcePrefixes sets the list of excluded resource prefixes
+func WithExcludedResourcePrefixes(excludedPrefixes []string) Option {
+	return func(o *options) {
+		o.workloadInfoOptions = append(o.workloadInfoOptions, workload.WithExcludedResourcePrefixes(excludedPrefixes))
 	}
 }
 
@@ -76,6 +85,8 @@ type Manager struct {
 	cohorts map[string]sets.Set[string]
 
 	workloadOrdering workload.Ordering
+
+	workloadInfoOptions []workload.InfoOption
 }
 
 func NewManager(client client.Client, checker StatusChecker, opts ...Option) *Manager {
@@ -94,6 +105,7 @@ func NewManager(client client.Client, checker StatusChecker, opts ...Option) *Ma
 		workloadOrdering: workload.Ordering{
 			PodsReadyRequeuingTimestamp: options.podsReadyRequeuingTimestamp,
 		},
+		workloadInfoOptions: options.workloadInfoOptions,
 	}
 	m.cond.L = &m.RWMutex
 	return m
@@ -204,7 +216,7 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 			continue
 		}
 		workload.AdjustResources(ctx, m.client, &w)
-		qImpl.AddOrUpdate(workload.NewInfo(&w))
+		qImpl.AddOrUpdate(workload.NewInfo(&w, m.workloadInfoOptions...))
 	}
 	cq := m.clusterQueues[qImpl.ClusterQueue]
 	if cq != nil && cq.AddFromLocalQueue(qImpl) {
@@ -218,7 +230,7 @@ func (m *Manager) UpdateLocalQueue(q *kueue.LocalQueue) error {
 	defer m.Unlock()
 	qImpl, ok := m.localQueues[Key(q)]
 	if !ok {
-		return errQueueDoesNotExist
+		return ErrQueueDoesNotExist
 	}
 	if qImpl.ClusterQueue != string(q.Spec.ClusterQueue) {
 		oldCQ := m.clusterQueues[qImpl.ClusterQueue]
@@ -255,7 +267,7 @@ func (m *Manager) PendingWorkloads(q *kueue.LocalQueue) (int32, error) {
 
 	qImpl, ok := m.localQueues[Key(q)]
 	if !ok {
-		return 0, errQueueDoesNotExist
+		return 0, ErrQueueDoesNotExist
 	}
 
 	return int32(len(qImpl.items)), nil
@@ -293,16 +305,16 @@ func (m *Manager) ClusterQueueForWorkload(wl *kueue.Workload) (string, bool) {
 func (m *Manager) AddOrUpdateWorkload(w *kueue.Workload) bool {
 	m.Lock()
 	defer m.Unlock()
-	return m.addOrUpdateWorkload(w)
+	return m.AddOrUpdateWorkloadWithoutLock(w)
 }
 
-func (m *Manager) addOrUpdateWorkload(w *kueue.Workload) bool {
+func (m *Manager) AddOrUpdateWorkloadWithoutLock(w *kueue.Workload) bool {
 	qKey := workload.QueueKey(w)
 	q := m.localQueues[qKey]
 	if q == nil {
 		return false
 	}
-	wInfo := workload.NewInfo(w)
+	wInfo := workload.NewInfo(w, m.workloadInfoOptions...)
 	q.AddOrUpdate(wInfo)
 	cq := m.clusterQueues[q.ClusterQueue]
 	if cq == nil {
@@ -453,7 +465,7 @@ func (m *Manager) UpdateWorkload(oldW, w *kueue.Workload) bool {
 	if oldW.Spec.QueueName != w.Spec.QueueName {
 		m.deleteWorkloadFromQueueAndClusterQueue(w, workload.QueueKey(oldW))
 	}
-	return m.addOrUpdateWorkload(w)
+	return m.AddOrUpdateWorkloadWithoutLock(w)
 }
 
 // CleanUpOnContext tracks the context. When closed, it wakes routines waiting
@@ -568,13 +580,18 @@ func (m *Manager) PendingWorkloadsInfo(cqName string) []*workload.Info {
 	return cq.Snapshot()
 }
 
-func (m *Manager) ClusterQueueFromLocalQueue(lqName string) (string, error) {
+// ClusterQueueFromLocalQueue returns ClusterQueue name, with a QueueKey(namespace/localQueueName) as the parameter
+func (m *Manager) ClusterQueueFromLocalQueue(localQueueKey string) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
-	if lq, ok := m.localQueues[lqName]; ok {
+	if lq, ok := m.localQueues[localQueueKey]; ok {
 		return lq.ClusterQueue, nil
 	}
-	return "", errQueueDoesNotExist
+	return "", ErrQueueDoesNotExist
+}
+
+func QueueKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 // UpdateSnapshot computes the new snapshot and replaces if it differs from the

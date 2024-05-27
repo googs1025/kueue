@@ -74,7 +74,6 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Ordered, ginkgo.ContinueOnFa
 			},
 		}
 		gomega.Expect(k8sClient.Create(ctx, ns)).To(gomega.Succeed())
-
 	})
 	ginkgo.AfterEach(func() {
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
@@ -153,7 +152,6 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Ordered, ginkgo.ContinueOnFa
 			return k8sClient.Get(ctx, key, wl)
 		}, util.Timeout, util.Interval).Should(testing.BeNotFoundError())
 		// check the original wl is still there
-		//gomega.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 		gomega.Eventually(func() error {
 			return k8sClient.Get(ctx, wlLookupKey, createdWorkload)
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
@@ -873,7 +871,6 @@ var _ = ginkgo.Describe("JobSet controller interacting with scheduler", ginkgo.O
 		gomega.Expect(createdJobSet.Spec.ReplicatedJobs[1].Template.Spec.Template.Spec.NodeSelector[instanceKey]).Should(gomega.Equal(onDemandFlavor.Name))
 		util.ExpectPendingWorkloadsMetric(clusterQueue, 0, 0)
 		util.ExpectReservingActiveWorkloadsMetric(clusterQueue, 1)
-
 	})
 
 	ginkgo.It("Should allow reclaim of resources that are no longer needed", func() {
@@ -961,7 +958,6 @@ var _ = ginkgo.Describe("JobSet controller interacting with scheduler", ginkgo.O
 			gomega.Eventually(func() []kueue.ReclaimablePod {
 				gomega.Expect(k8sClient.Get(ctx, wlKey, wl)).Should(gomega.Succeed())
 				return wl.Status.ReclaimablePods
-
 			}, util.Timeout, util.Interval).Should(gomega.BeComparableTo([]kueue.ReclaimablePod{
 				{
 					Name:  "replicated-job-1",

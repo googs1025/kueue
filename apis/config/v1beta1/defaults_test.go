@@ -364,7 +364,9 @@ func TestSetDefaults_Configuration(t *testing.T) {
 					BlockAdmission: ptr.To(true),
 					Timeout:        &podsReadyTimeoutTimeout,
 					RequeuingStrategy: &RequeuingStrategy{
-						Timestamp: ptr.To(EvictionTimestamp),
+						Timestamp:          ptr.To(EvictionTimestamp),
+						BackoffBaseSeconds: ptr.To[int32](DefaultRequeuingBackoffBaseSeconds),
+						BackoffMaxSeconds:  ptr.To[int32](DefaultRequeuingBackoffMaxSeconds),
 					},
 				},
 				Namespace:         ptr.To(DefaultNamespace),
@@ -393,7 +395,9 @@ func TestSetDefaults_Configuration(t *testing.T) {
 					BlockAdmission: ptr.To(false),
 					Timeout:        &podsReadyTimeoutTimeout,
 					RequeuingStrategy: &RequeuingStrategy{
-						Timestamp: ptr.To(EvictionTimestamp),
+						Timestamp:          ptr.To(EvictionTimestamp),
+						BackoffBaseSeconds: ptr.To[int32](DefaultRequeuingBackoffBaseSeconds),
+						BackoffMaxSeconds:  ptr.To[int32](DefaultRequeuingBackoffMaxSeconds),
 					},
 				},
 				Namespace:         ptr.To(DefaultNamespace),
@@ -413,7 +417,9 @@ func TestSetDefaults_Configuration(t *testing.T) {
 					Enable:  true,
 					Timeout: &podsReadyTimeoutOverwrite,
 					RequeuingStrategy: &RequeuingStrategy{
-						Timestamp: ptr.To(CreationTimestamp),
+						Timestamp:          ptr.To(CreationTimestamp),
+						BackoffBaseSeconds: ptr.To[int32](63),
+						BackoffMaxSeconds:  ptr.To[int32](1800),
 					},
 				},
 				InternalCertManagement: &InternalCertManagement{
@@ -426,7 +432,9 @@ func TestSetDefaults_Configuration(t *testing.T) {
 					BlockAdmission: ptr.To(true),
 					Timeout:        &podsReadyTimeoutOverwrite,
 					RequeuingStrategy: &RequeuingStrategy{
-						Timestamp: ptr.To(CreationTimestamp),
+						Timestamp:          ptr.To(CreationTimestamp),
+						BackoffBaseSeconds: ptr.To[int32](63),
+						BackoffMaxSeconds:  ptr.To[int32](1800),
 					},
 				},
 				Namespace:         ptr.To(DefaultNamespace),
@@ -543,6 +551,31 @@ func TestSetDefaults_Configuration(t *testing.T) {
 					GCInterval:        &metav1.Duration{},
 					Origin:            ptr.To("multikueue-manager1"),
 					WorkerLostTimeout: &metav1.Duration{Duration: 15 * time.Minute},
+				},
+			},
+		},
+		"add default fair sharing configuration when enabled": {
+			original: &Configuration{
+				InternalCertManagement: &InternalCertManagement{
+					Enable: ptr.To(false),
+				},
+				FairSharing: &FairSharing{
+					Enable: true,
+				},
+			},
+			want: &Configuration{
+				Namespace:         ptr.To(DefaultNamespace),
+				ControllerManager: defaultCtrlManagerConfigurationSpec,
+				InternalCertManagement: &InternalCertManagement{
+					Enable: ptr.To(false),
+				},
+				ClientConnection: defaultClientConnection,
+				Integrations:     defaultIntegrations,
+				QueueVisibility:  defaultQueueVisibility,
+				MultiKueue:       defaultMultiKueue,
+				FairSharing: &FairSharing{
+					Enable:               true,
+					PreemptionStrategies: []PreemptionStrategy{LessThanOrEqualToFinalShare, LessThanInitialShare},
 				},
 			},
 		},

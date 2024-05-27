@@ -10,6 +10,7 @@ description: >
 - [Before you begin](#before-you-begin)
 - [Install a released version](#install-a-released-version)
   - [Add metrics scraping for prometheus-operator](#add-metrics-scraping-for-prometheus-operator)
+  - [Add visibility API to monitor pending workloads](#add-visibility-api-to-monitor-pending-workloads)
   - [Uninstall](#uninstall)
 - [Install a custom-configured released version](#install-a-custom-configured-released-version)
 - [Install the latest development version](#install-the-latest-development-version)
@@ -19,6 +20,7 @@ description: >
   - [Uninstall](#uninstall-2)
 - [Install via Helm](#install-via-helm)
 - [Change the feature gates configuration](#change-the-feature-gates-configuration)
+- [What's next](#whats-next)
 
 <!-- /toc -->
 
@@ -62,9 +64,26 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 To allow [prometheus-operator](https://github.com/prometheus-operator/prometheus-operator)
 to scrape metrics from kueue components, run the following command:
 
+> **Note**: This feature depends on [servicemonitor CRD](https://github.com/prometheus-operator/kube-prometheus/blob/main/manifests/setup/0servicemonitorCustomResourceDefinition.yaml), please ensure that CRD is installed first.
+> We can follow `https://prometheus-operator.dev/docs/prologue/quick-start/` to install it.
+> 
+
 ```shell
 kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/prometheus.yaml
 ```
+
+### Add visibility API to monitor pending workloads
+
+> _Available in Kueue v0.6.0 and later_
+
+To add the visibility API that enables monitoring pending workloads, change [the feature gates configuration](/docs/installation/#change-the-feature-gates-configuration) and set `VisibilityOnDemand=true`, and run the following command
+
+```shell
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/visibility-api.yaml
+```
+
+See [the visibility API](/docs/tasks/manage/monitor_pending_workloads/pending_workloads_on_demand) for more details.
+
 
 ### Uninstall
 
@@ -93,8 +112,6 @@ the default Kueue Configuration
 struct ([v1beta1@main](https://pkg.go.dev/sigs.k8s.io/kueue@main/apis/config/v1beta1#Configuration)).
 The contents of the ConfigMap are similar to the following:
 
-> __The `namespace` and `internalCertManagement` fields are available in Kueue v0.3.0 and later__
-
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -121,15 +138,17 @@ data:
     waitForPodsReady:
       enable: true
       timeout: 10m
-    # pprofBindAddress: :8082
+    # pprofBindAddress: :8083
     integrations:
       frameworks:
       - "batch/job"
     # - "kubeflow.org/mpijob"
     # - "ray.io/rayjob"
+    # externalFrameworks:
+    # - "Foo.v1.example.com"
 ```
 
-__The `namespace`, `waitForPodsReady`, and `internalCertManagement` fields are available in Kueue v0.3.0 and later__
+__The `integrations.externalFrameworks` field is available in Kueue v0.7.0 and later.__
 
 > **Note**
 > See [Sequential Admission with Ready Pods](/docs/tasks/setup_sequential_admission) to learn

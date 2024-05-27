@@ -33,7 +33,6 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	autoscaling "k8s.io/autoscaler/cluster-autoscaler/apis/provisioningrequest/autoscaling.x-k8s.io/v1beta1"
 	"k8s.io/client-go/discovery"
@@ -153,9 +152,14 @@ func main() {
 	} else {
 		close(certsReady)
 	}
-
-	cCache := cache.New(mgr.GetClient(), cache.WithPodsReadyTracking(blockForPodsReady(&cfg)))
-	queues := queue.NewManager(mgr.GetClient(), cCache, queue.WithPodsReadyRequeuingTimestamp(podsReadyRequeuingTimestamp(&cfg)))
+	cacheOptions := []cache.Option{cache.WithPodsReadyTracking(blockForPodsReady(&cfg))}
+	queueOptions := []queue.Option{queue.WithPodsReadyRequeuingTimestamp(podsReadyRequeuingTimestamp(&cfg))}
+	if cfg.Resources != nil && len(cfg.Resources.ExcludeResourcePrefixes) > 0 {
+		cacheOptions = append(cacheOptions, cache.WithExcludedResourcePrefixes(cfg.Resources.ExcludeResourcePrefixes))
+		queueOptions = append(queueOptions, queue.WithExcludedResourcePrefixes(cfg.Resources.ExcludeResourcePrefixes))
+	}
+	cCache := cache.New(mgr.GetClient(), cacheOptions...)
+	queues := queue.NewManager(mgr.GetClient(), cCache, queueOptions...)
 
 	ctx := ctrl.SetupSignalHandler()
 	if err := setupIndexes(ctx, mgr, &cfg); err != nil {
@@ -216,7 +220,7 @@ func setupIndexes(ctx context.Context, mgr ctrl.Manager, cfg *configapi.Configur
 	}
 
 	opts := []jobframework.Option{
-		jobframework.WithEnabledFrameworks(cfg.Integrations),
+		jobframework.WithEnabledFrameworks(cfg.Integrations.Frameworks),
 	}
 	return jobframework.SetupIndexes(ctx, mgr.GetFieldIndexer(), opts...)
 }
@@ -267,9 +271,12 @@ func setupControllers(mgr ctrl.Manager, cCache *cache.Cache, queues *queue.Manag
 		jobframework.WithWaitForPodsReady(cfg.WaitForPodsReady),
 		jobframework.WithKubeServerVersion(serverVersionFetcher),
 		jobframework.WithIntegrationOptions(corev1.SchemeGroupVersion.WithKind("Pod").String(), cfg.Integrations.PodOptions),
-		jobframework.WithEnabledFrameworks(cfg.Integrations),
+		jobframework.WithEnabledFrameworks(cfg.Integrations.Frameworks),
+		jobframework.WithEnabledExternalFrameworks(cfg.Integrations.ExternalFrameworks),
 		jobframework.WithManagerName(constants.KueueName),
 		jobframework.WithLabelKeysToCopy(cfg.Integrations.LabelKeysToCopy),
+		jobframework.WithCache(cCache),
+		jobframework.WithQueues(queues),
 	}
 	if err := jobframework.SetupControllers(mgr, setupLog, opts...); err != nil {
 		setupLog.Error(err, "Unable to create controller or webhook", "kubernetesVersion", serverVersionFetcher.GetServerVersion())
@@ -314,6 +321,7 @@ func setupScheduler(mgr ctrl.Manager, cCache *cache.Cache, queues *queue.Manager
 		mgr.GetClient(),
 		mgr.GetEventRecorderFor(constants.AdmissionName),
 		scheduler.WithPodsReadyRequeuingTimestamp(podsReadyRequeuingTimestamp(cfg)),
+		scheduler.WithFairSharing(cfg.FairSharing),
 	)
 	if err := mgr.Add(sched); err != nil {
 		setupLog.Error(err, "Unable to add scheduler to manager")
@@ -360,27 +368,10 @@ func apply(configFile string) (ctrl.Options, configapi.Configuration, error) {
 	if err != nil {
 		return options, cfg, err
 	}
-
-	if cfg.Integrations != nil {
-		var errorlist field.ErrorList
-		availableFrameworks := jobframework.GetIntegrationsList()
-		path := field.NewPath("integrations", "frameworks")
-		for _, framework := range cfg.Integrations.Frameworks {
-			if _, found := jobframework.GetIntegration(framework); !found {
-				errorlist = append(errorlist, field.NotSupported(path, framework, availableFrameworks))
-			}
-		}
-		if len(errorlist) > 0 {
-			err := errorlist.ToAggregate()
-			return options, cfg, err
-		}
-	}
-
 	cfgStr, err := config.Encode(scheme, &cfg)
 	if err != nil {
 		return options, cfg, err
 	}
 	setupLog.Info("Successfully loaded configuration", "config", cfgStr)
-
 	return options, cfg, nil
 }

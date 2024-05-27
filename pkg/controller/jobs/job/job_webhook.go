@@ -87,7 +87,7 @@ func (w *JobWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (ad
 
 func (w *JobWebhook) validateCreate(job *Job) field.ErrorList {
 	var allErrs field.ErrorList
-	allErrs = append(allErrs, jobframework.ValidateCreateForQueueName(job)...)
+	allErrs = append(allErrs, jobframework.ValidateJobOnCreate(job)...)
 	allErrs = append(allErrs, w.validatePartialAdmissionCreate(job)...)
 	return allErrs
 }
@@ -98,10 +98,8 @@ func (w *JobWebhook) validatePartialAdmissionCreate(job *Job) field.ErrorList {
 		v, err := strconv.Atoi(strVal)
 		if err != nil {
 			allErrs = append(allErrs, field.Invalid(minPodsCountAnnotationsPath, job.Annotations[JobMinParallelismAnnotation], err.Error()))
-		} else {
-			if int32(v) >= job.podsCount() || v <= 0 {
-				allErrs = append(allErrs, field.Invalid(minPodsCountAnnotationsPath, v, fmt.Sprintf("should be between 0 and %d", job.podsCount()-1)))
-			}
+		} else if int32(v) >= job.podsCount() || v <= 0 {
+			allErrs = append(allErrs, field.Invalid(minPodsCountAnnotationsPath, v, fmt.Sprintf("should be between 0 and %d", job.podsCount()-1)))
 		}
 	}
 	if strVal, found := job.Annotations[JobCompletionsEqualParallelismAnnotation]; found {
@@ -138,9 +136,8 @@ func (w *JobWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.
 
 func (w *JobWebhook) validateUpdate(oldJob, newJob *Job) field.ErrorList {
 	allErrs := w.validateCreate(newJob)
-	allErrs = append(allErrs, jobframework.ValidateUpdateForQueueName(oldJob, newJob)...)
+	allErrs = append(allErrs, jobframework.ValidateJobOnUpdate(oldJob, newJob)...)
 	allErrs = append(allErrs, validatePartialAdmissionUpdate(oldJob, newJob)...)
-	allErrs = append(allErrs, jobframework.ValidateUpdateForWorkloadPriorityClassName(oldJob, newJob)...)
 	return allErrs
 }
 

@@ -119,7 +119,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if !workload.HasQuotaReservation(wl) || apimeta.IsStatusConditionTrue(wl.Status.Conditions, kueue.WorkloadFinished) {
-		//1.2 workload has no reservation or is finished
+		// 1.2 workload has no reservation or is finished
 		log.V(5).Info("workload with no reservation, delete owned requests")
 		return reconcile.Result{}, c.deleteOwnedProvisionRequests(ctx, req.Namespace, req.Name)
 	}
@@ -222,7 +222,7 @@ func (c *Controller) syncOwnedProvisionRequest(ctx context.Context, wl *kueue.Wo
 	log := ctrl.LoggerFrom(ctx)
 	var requeAfter *time.Duration
 	for _, checkName := range relevantChecks {
-		//get the config
+		// get the config
 		prc, err := c.helper.ConfigForAdmissionCheck(ctx, checkName)
 		if err != nil {
 			// the check is not active
@@ -462,6 +462,22 @@ func passProvReqParams(wl *kueue.Workload, req *autoscaling.ProvisioningRequest)
 	}
 }
 
+func updateCheckMessage(checkState *kueue.AdmissionCheckState, message string) bool {
+	if message == "" || checkState.Message == message {
+		return false
+	}
+	checkState.Message = message
+	return true
+}
+
+func updateCheckState(checkState *kueue.AdmissionCheckState, state kueue.CheckState) bool {
+	if checkState.State == state {
+		return false
+	}
+	checkState.State = state
+	return true
+}
+
 func (c *Controller) syncCheckStates(ctx context.Context, wl *kueue.Workload, checks []string, activeOrLastPRForChecks map[string]*autoscaling.ProvisioningRequest) error {
 	log := ctrl.LoggerFrom(ctx)
 	checksMap := slices.ToRefMap(wl.Status.AdmissionChecks, func(c *kueue.AdmissionCheckState) string { return c.Name })
@@ -472,15 +488,11 @@ func (c *Controller) syncCheckStates(ctx context.Context, wl *kueue.Workload, ch
 		checkState := *checksMap[check]
 		if prc, err := c.helper.ConfigForAdmissionCheck(ctx, check); err != nil {
 			// the check is not active
-			if checkState.State != kueue.CheckStatePending || checkState.Message != CheckInactiveMessage {
-				updated = true
-				checkState.State = kueue.CheckStatePending
-				checkState.Message = CheckInactiveMessage
-			}
+			updated = updateCheckState(&checkState, kueue.CheckStatePending) || updated
+			updated = updateCheckMessage(&checkState, CheckInactiveMessage) || updated
 		} else if !c.reqIsNeeded(ctx, wl, prc) {
-			if checkState.State != kueue.CheckStateReady {
+			if updateCheckState(&checkState, kueue.CheckStateReady) {
 				updated = true
-				checkState.State = kueue.CheckStateReady
 				checkState.Message = NoRequestNeeded
 				checkState.PodSetUpdates = nil
 			}
@@ -492,7 +504,13 @@ func (c *Controller) syncCheckStates(ctx context.Context, wl *kueue.Workload, ch
 
 			prFailed := apimeta.IsStatusConditionTrue(pr.Status.Conditions, autoscaling.Failed)
 			prProvisioned := apimeta.IsStatusConditionTrue(pr.Status.Conditions, autoscaling.Provisioned)
-			log.V(3).Info("Synchronizing admission check state based on provisioning request", "wl", klog.KObj(wl), "check", check, "prName", pr.Name, "failed", prFailed, "accepted", prProvisioned)
+			prAccepted := apimeta.IsStatusConditionTrue(pr.Status.Conditions, autoscaling.Accepted)
+			log.V(3).Info("Synchronizing admission check state based on provisioning request", "wl", klog.KObj(wl),
+				"check", check,
+				"prName", pr.Name,
+				"failed", prFailed,
+				"provisioned", prProvisioned,
+				"accepted", prAccepted)
 
 			switch {
 			case prFailed:
@@ -500,9 +518,8 @@ func (c *Controller) syncCheckStates(ctx context.Context, wl *kueue.Workload, ch
 					if attempt := getAttempt(ctx, pr, wl.Name, check); attempt <= MaxRetries {
 						// it is going to be retried
 						message := fmt.Sprintf("Retrying after failure: %s", apimeta.FindStatusCondition(pr.Status.Conditions, autoscaling.Failed).Message)
-						updated = updated || checkState.State != kueue.CheckStatePending || checkState.Message != message
-						checkState.State = kueue.CheckStatePending
-						checkState.Message = message
+						updated = updateCheckState(&checkState, kueue.CheckStatePending) || updated
+						updated = updateCheckMessage(&checkState, message) || updated
 					} else {
 						updated = true
 						checkState.State = kueue.CheckStateRejected
@@ -510,17 +527,22 @@ func (c *Controller) syncCheckStates(ctx context.Context, wl *kueue.Workload, ch
 					}
 				}
 			case prProvisioned:
-				if checkState.State != kueue.CheckStateReady {
+				if updateCheckState(&checkState, kueue.CheckStateReady) {
 					updated = true
-					checkState.State = kueue.CheckStateReady
 					// add the pod podSetUpdates
 					checkState.PodSetUpdates = podSetUpdates(wl, pr)
+					// propagate the message from the provisioning request status into the workload
+					// to change to the "successfully provisioned" message after provisioning
+					updateCheckMessage(&checkState, apimeta.FindStatusCondition(pr.Status.Conditions, autoscaling.Provisioned).Message)
+				}
+			case prAccepted:
+				if provisionedCond := apimeta.FindStatusCondition(pr.Status.Conditions, autoscaling.Provisioned); provisionedCond != nil {
+					// propagate the ETA update from the provisioning request into the workload
+					updated = updateCheckMessage(&checkState, provisionedCond.Message) || updated
+					updated = updateCheckState(&checkState, kueue.CheckStatePending) || updated
 				}
 			default:
-				if checkState.State != kueue.CheckStatePending {
-					updated = true
-					checkState.State = kueue.CheckStatePending
-				}
+				updated = updateCheckState(&checkState, kueue.CheckStatePending) || updated
 			}
 		}
 
@@ -553,8 +575,10 @@ func podSetUpdates(wl *kueue.Workload, pr *autoscaling.ProvisioningRequest) []ku
 	})
 	return slices.Map(pr.Spec.PodSets, func(ps *autoscaling.PodSet) kueue.PodSetUpdate {
 		return kueue.PodSetUpdate{
-			Name:        refMap[ps.PodTemplateRef.Name],
-			Annotations: map[string]string{ConsumesAnnotationKey: pr.Name},
+			Name: refMap[ps.PodTemplateRef.Name],
+			Annotations: map[string]string{
+				ConsumesAnnotationKey:  pr.Name,
+				ClassNameAnnotationKey: pr.Spec.ProvisioningClassName},
 		}
 	})
 }
@@ -795,7 +819,7 @@ func remainingTime(prc *kueue.ProvisioningRequestConfig, failuresCount int32, la
 	maxBackoff := 30 * time.Minute
 	backoffDuration := defaultBackoff
 	for i := 1; i < int(failuresCount); i++ {
-		backoffDuration = backoffDuration * 2
+		backoffDuration *= 2
 		if backoffDuration >= maxBackoff {
 			backoffDuration = maxBackoff
 			break

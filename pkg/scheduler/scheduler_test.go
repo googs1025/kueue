@@ -1697,7 +1697,7 @@ func TestSchedule(t *testing.T) {
 					t.Errorf("couldn't create the cluster queue: %v", err)
 				}
 			}
-			scheduler := New(qManager, cqCache, cl, recorder, WithFairSharing(tc.enableFairSharing))
+			scheduler := New(qManager, cqCache, cl, recorder, WithFairSharing(&config.FairSharing{Enable: tc.enableFairSharing}))
 			gotScheduled := make(map[string]kueue.Admission)
 			var mu sync.Mutex
 			scheduler.applyAdmission = func(ctx context.Context, w *kueue.Workload) error {
@@ -1748,11 +1748,12 @@ func TestSchedule(t *testing.T) {
 			for cqName, c := range snapshot.ClusterQueues {
 				for name, w := range c.Workloads {
 					gotWorkloads = append(gotWorkloads, *w.Obj)
-					if !workload.HasQuotaReservation(w.Obj) {
+					switch {
+					case !workload.HasQuotaReservation(w.Obj):
 						t.Errorf("Workload %s is not admitted by a clusterQueue, but it is found as member of clusterQueue %s in the cache", name, cqName)
-					} else if string(w.Obj.Status.Admission.ClusterQueue) != cqName {
+					case string(w.Obj.Status.Admission.ClusterQueue) != cqName:
 						t.Errorf("Workload %s is admitted by clusterQueue %s, but it is found as member of clusterQueue %s in the cache", name, w.Obj.Status.Admission.ClusterQueue, cqName)
-					} else {
+					default:
 						gotAssignments[name] = *w.Obj.Status.Admission
 					}
 				}
@@ -1966,7 +1967,7 @@ func TestLastSchedulingContext(t *testing.T) {
 					Resource(corev1.ResourceCPU, "100", "0").Obj(),
 			).Obj(),
 	}
-	clusterQueue_cohort := []kueue.ClusterQueue{
+	clusterQueueCohort := []kueue.ClusterQueue{
 		*utiltesting.MakeClusterQueue("eng-cohort-alpha").
 			Cohort("cohort").
 			QueueingStrategy(kueue.StrictFIFO).
@@ -2117,7 +2118,7 @@ func TestLastSchedulingContext(t *testing.T) {
 		},
 		{
 			name: "borrow before next flavor",
-			cqs:  clusterQueue_cohort,
+			cqs:  clusterQueueCohort,
 			admittedWorkloads: []kueue.Workload{
 				*utiltesting.MakeWorkload("placeholder", "default").
 					Request(corev1.ResourceCPU, "50").
@@ -2149,7 +2150,7 @@ func TestLastSchedulingContext(t *testing.T) {
 		},
 		{
 			name: "borrow after all flavors",
-			cqs:  clusterQueue_cohort,
+			cqs:  clusterQueueCohort,
 			admittedWorkloads: []kueue.Workload{
 				*utiltesting.MakeWorkload("placeholder", "default").
 					Request(corev1.ResourceCPU, "50").
@@ -2181,7 +2182,7 @@ func TestLastSchedulingContext(t *testing.T) {
 		},
 		{
 			name: "when the next flavor is full, but can borrow on first",
-			cqs:  clusterQueue_cohort,
+			cqs:  clusterQueueCohort,
 			admittedWorkloads: []kueue.Workload{
 				*utiltesting.MakeWorkload("placeholder", "default").
 					Request(corev1.ResourceCPU, "40").
@@ -2219,7 +2220,7 @@ func TestLastSchedulingContext(t *testing.T) {
 		},
 		{
 			name: "when the next flavor is full, but can preempt on first",
-			cqs:  clusterQueue_cohort,
+			cqs:  clusterQueueCohort,
 			admittedWorkloads: []kueue.Workload{
 				*utiltesting.MakeWorkload("placeholder-alpha", "default").
 					Priority(-1).
@@ -2344,11 +2345,12 @@ func TestLastSchedulingContext(t *testing.T) {
 			snapshot := cqCache.Snapshot()
 			for cqName, c := range snapshot.ClusterQueues {
 				for name, w := range c.Workloads {
-					if !workload.IsAdmitted(w.Obj) {
+					switch {
+					case !workload.IsAdmitted(w.Obj):
 						t.Errorf("Workload %s is not admitted by a clusterQueue, but it is found as member of clusterQueue %s in the cache", name, cqName)
-					} else if string(w.Obj.Status.Admission.ClusterQueue) != cqName {
+					case string(w.Obj.Status.Admission.ClusterQueue) != cqName:
 						t.Errorf("Workload %s is admitted by clusterQueue %s, but it is found as member of clusterQueue %s in the cache", name, w.Obj.Status.Admission.ClusterQueue, cqName)
-					} else {
+					default:
 						gotAssignments[name] = *w.Obj.Status.Admission
 					}
 				}

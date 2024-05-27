@@ -39,9 +39,11 @@ import (
 )
 
 const (
-	ControllerName        = "kueue.x-k8s.io/multikueue"
-	SingleInstanceReason  = "MultiKueue"
-	SingleInstanceMessage = "only one multikueue managed admission check can be used in one ClusterQueue"
+	ControllerName                = "kueue.x-k8s.io/multikueue"
+	SingleInstanceReason          = "MultiKueue"
+	SingleInstanceMessage         = "only one multikueue managed admission check can be used in one ClusterQueue"
+	FlavorIndependentCheckReason  = "MultiKueue"
+	FlavorIndependentCheckMessage = "admission check cannot be applied at ResourceFlavor level"
 )
 
 type multiKueueStoreHelper = admissioncheck.ConfigHelper[*kueuealpha.MultiKueueConfig, kueuealpha.MultiKueueConfig]
@@ -81,7 +83,6 @@ func (a *ACReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 		newCondition.Status = metav1.ConditionFalse
 		newCondition.Reason = "BadConfig"
 		newCondition.Message = fmt.Sprintf("Cannot load the AdmissionChecks parameters: %s", err.Error())
-
 	} else {
 		var missingClusters []string
 		var inactiveClusters []string
@@ -96,10 +97,8 @@ func (a *ACReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 
 			if err != nil {
 				missingClusters = append(missingClusters, clusterName)
-			} else {
-				if !apimeta.IsStatusConditionTrue(cluster.Status.Conditions, kueuealpha.MultiKueueClusterActive) {
-					inactiveClusters = append(inactiveClusters, clusterName)
-				}
+			} else if !apimeta.IsStatusConditionTrue(cluster.Status.Conditions, kueuealpha.MultiKueueClusterActive) {
+				inactiveClusters = append(inactiveClusters, clusterName)
 			}
 		}
 		unusableClustersCount := len(missingClusters) + len(inactiveClusters)
@@ -135,6 +134,17 @@ func (a *ACReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 			Status:             metav1.ConditionTrue,
 			Reason:             SingleInstanceReason,
 			Message:            SingleInstanceMessage,
+			ObservedGeneration: ac.Generation,
+		})
+		needsUpdate = true
+	}
+
+	if !apimeta.IsStatusConditionTrue(ac.Status.Conditions, kueue.FlavorIndependentAdmissionCheck) {
+		apimeta.SetStatusCondition(&ac.Status.Conditions, metav1.Condition{
+			Type:               kueue.FlavorIndependentAdmissionCheck,
+			Status:             metav1.ConditionTrue,
+			Reason:             FlavorIndependentCheckReason,
+			Message:            FlavorIndependentCheckMessage,
 			ObservedGeneration: ac.Generation,
 		})
 		needsUpdate = true
@@ -254,7 +264,7 @@ func (m *mkClusterHandler) Create(ctx context.Context, event event.CreateEvent, 
 		return
 	}
 
-	if err := queueReconcileForConfigUsers(ctx, mkc.Name, m.client, q); err != nil {
+	if err := m.queue(ctx, mkc, q); err != nil {
 		ctrl.LoggerFrom(ctx).V(2).Error(err, "Failure on create event", "multiKueueCluster", klog.KObj(mkc))
 	}
 }

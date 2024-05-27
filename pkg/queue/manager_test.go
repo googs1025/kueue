@@ -234,7 +234,7 @@ func TestClusterQueueToActive(t *testing.T) {
 	case <-condRec:
 		gotCondBeforeCleanup = true
 	case <-time.After(100 * time.Millisecond):
-		//nothing
+		// nothing
 	}
 
 	counterCancel()
@@ -481,7 +481,7 @@ func TestStatus(t *testing.T) {
 		"fake": {
 			queue:      &kueue.LocalQueue{ObjectMeta: metav1.ObjectMeta{Name: "fake"}},
 			wantStatus: 0,
-			wantErr:    errQueueDoesNotExist,
+			wantErr:    ErrQueueDoesNotExist,
 		},
 	}
 	for name, tc := range cases {
